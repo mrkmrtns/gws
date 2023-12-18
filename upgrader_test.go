@@ -127,6 +127,25 @@ func TestAccept(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("ok SubProtocols overwrite", func(t *testing.T) {
+		upgrader.option.CompressEnabled = true
+		upgrader.option.SubProtocols = []string{"chat"}
+		var request = &http.Request{
+			Header: http.Header{},
+			Method: http.MethodGet,
+		}
+		request.Header.Set("Connection", "Upgrade")
+		request.Header.Set("Upgrade", "websocket")
+		request.Header.Set("Sec-WebSocket-Version", "13")
+		request.Header.Set("Sec-WebSocket-Key", "3tTS/Y+YGaM7TTnPuafHng==")
+		request.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+		request.Header.Set("Sec-WebSocket-Protocol", "newchat")
+		_, err := upgrader.UpgradeWithOptions(newHttpWriter(), request, UpgradeOptions{
+			SubProtocols: []string{"newchat"},
+		})
+		assert.NoError(t, err)
+	})
+
 	t.Run("fail Sec-WebSocket-Version", func(t *testing.T) {
 		var request = &http.Request{
 			Header: http.Header{},

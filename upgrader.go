@@ -75,6 +75,12 @@ type Upgrader struct {
 	eventHandler Event
 }
 
+type UpgradeOptions struct {
+	// WebSocket子协议, 握手失败会断开连接
+	// WebSocket sub-protocol, handshake failure disconnects the connection
+	SubProtocols []string
+}
+
 func NewUpgrader(eventHandler Event, option *ServerOption) *Upgrader {
 	return &Upgrader{
 		option:       initServerOption(option),
@@ -89,7 +95,22 @@ func (c *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 		return nil, err
 	}
 
-	socket, err := c.doUpgrade(r, netConn, br)
+	socket, err := c.doUpgrade(r, netConn, br, UpgradeOptions{})
+	if err != nil {
+		_ = netConn.Close()
+		return nil, err
+	}
+	return socket, err
+}
+
+// Upgrade http upgrade to websocket protocol
+func (c *Upgrader) UpgradeWithOptions(w http.ResponseWriter, r *http.Request, opts UpgradeOptions) (*Conn, error) {
+	netConn, br, err := c.hijack(w)
+	if err != nil {
+		return nil, err
+	}
+
+	socket, err := c.doUpgrade(r, netConn, br, opts)
 	if err != nil {
 		_ = netConn.Close()
 		return nil, err
@@ -112,7 +133,7 @@ func (c *Upgrader) hijack(w http.ResponseWriter) (net.Conn, *bufio.Reader, error
 	return netConn, br, nil
 }
 
-func (c *Upgrader) doUpgrade(r *http.Request, netConn net.Conn, br *bufio.Reader) (*Conn, error) {
+func (c *Upgrader) doUpgrade(r *http.Request, netConn net.Conn, br *bufio.Reader, opts UpgradeOptions) (*Conn, error) {
 	var session = c.option.NewSession()
 	if !c.option.Authorize(r, session) {
 		return nil, ErrUnauthorized
@@ -143,7 +164,11 @@ func (c *Upgrader) doUpgrade(r *http.Request, netConn net.Conn, br *bufio.Reader
 		return nil, ErrHandshake
 	}
 	rw.WithHeader(internal.SecWebSocketAccept.Key, internal.ComputeAcceptKey(websocketKey))
-	rw.WithSubProtocol(r.Header, c.option.SubProtocols)
+	if opts.SubProtocols == nil {
+		rw.WithSubProtocol(r.Header, c.option.SubProtocols)
+	} else {
+		rw.WithSubProtocol(r.Header, opts.SubProtocols)
+	}
 	rw.WithExtraHeader(c.option.ResponseHeader)
 	if err := rw.Write(netConn, c.option.HandshakeTimeout); err != nil {
 		return nil, err
@@ -241,7 +266,7 @@ func (c *Server) RunListener(listener net.Listener) error {
 				return
 			}
 
-			socket, err := c.upgrader.doUpgrade(r, conn, br)
+			socket, err := c.upgrader.doUpgrade(r, conn, br, UpgradeOptions{})
 			if err != nil {
 				c.OnError(conn, err)
 				_ = conn.Close()
